@@ -1,0 +1,18 @@
+connect ws://localhost:8080/ws
+
+send
+CONNECT
+
+
+send
+SUBSCRIBE
+id:sub-0
+destination:/topic/echo_response
+
+
+send
+SEND
+destination:/app/echo
+
+Привет!
+
