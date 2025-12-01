@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spring Boot HTTP & WebSocket Client</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#4f46e5',
+                        'secondary': '#10b981',
+                        'background-dark': '#1f2937',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .action-button { transition: all 0.2s ease-in-out; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .action-button:hover { transform: translateY(-1px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+
+<div class="max-w-4xl mx-auto space-y-8">
+    <header class="text-center py-6 bg-white rounded-xl shadow-lg">
+        <h1 class="text-3xl font-bold text-gray-800">Spring Boot Demo: HTTP & WebSocket</h1>
+        <p class="text-gray-500 mt-2">Клиент для тестирования задач 1 и 2</p>
+    </header>
+
+    <div class="bg-white p-6 rounded-xl shadow-lg border-t-4 border-primary">
+        <h2 class="text-2xl font-semibold mb-4 text-primary">Задача 1: HTTP/REST Тест</h2>
+        <div class="flex flex-col sm:flex-row gap-4 mb-4">
+            <input type="text" id="httpName" placeholder="Введите имя для приветствия (например, Alex)"
+                   class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+            <button id="sendHttp"
+                    class="action-button bg-primary text-white font-semibold py-3 px-6 rounded-lg hover:bg-indigo-600">
+                Send HTTP Request
+            </button>
+        </div>
+        <div class="bg-gray-100 p-4 rounded-lg">
+            <p class="font-medium text-gray-700">HTTP Ответ:</p>
+            <code id="httpResponse" class="block mt-1 whitespace-pre-wrap text-sm text-gray-800">Ожидание запроса...</code>
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-xl shadow-lg border-t-4 border-secondary">
+        <h2 class="text-2xl font-semibold mb-4 text-secondary">Задача 2: WebSocket Чат (STOMP)</h2>
+
+        <div class="space-y-4 mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
+            <h3 class="text-xl font-medium text-green-700">Подключение</h3>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <input type="text" id="wsUsername" placeholder="Ваше имя пользователя (обязательно)"
+                       class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-secondary focus:border-secondary">
+                <button id="connectWs" disabled
+                        class="action-button bg-secondary text-white font-semibold py-3 px-6 rounded-lg hover:bg-green-600 disabled:opacity-50">
+                    Connect WebSocket
+                </button>
+                <button id="disconnectWs" disabled
+                        class="action-button bg-red-500 text-white font-semibold py-3 px-6 rounded-lg hover:bg-red-600 disabled:opacity-50">
+                    Disconnect
+                </button>
+            </div>
+            <p id="connectionStatus" class="text-sm font-medium text-gray-600">Статус: Отключено</p>
+        </div>
+
+        <div class="space-y-4 p-4 bg-gray-100 rounded-lg border border-gray-300">
+            <h3 class="text-xl font-medium text-gray-700">Отправка сообщения</h3>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <input type="text" id="wsMessage" placeholder="Введите сообщение" disabled
+                       class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-secondary focus:border-secondary">
+                <button id="sendWs" disabled
+                        class="action-button bg-blue-500 text-white font-semibold py-3 px-6 rounded-lg hover:bg-blue-600 disabled:opacity-50">
+                    Send WS Message
+                </button>
+            </div>
+        </div>
+
+        <div class="mt-6">
+            <h3 class="text-xl font-medium text-gray-700 mb-3">Лог чата:</h3>
+            <div id="messagesLog" class="h-64 overflow-y-auto bg-background-dark text-white p-4 rounded-lg shadow-inner space-y-2">
+                <p class="text-gray-400">Сообщения будут отображаться здесь...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- Элементы DOM ---
+        const httpNameInput = document.getElementById('httpName');
+        const sendHttpButton = document.getElementById('sendHttp');
+        const httpResponseCode = document.getElementById('httpResponse');
+
+        const wsUsernameInput = document.getElementById('wsUsername');
+        const connectWsButton = document.getElementById('connectWs');
+        const disconnectWsButton = document.getElementById('disconnectWs');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const wsMessageInput = document.getElementById('wsMessage');
+        const sendWsButton = document.getElementById('sendWs');
+        const messagesLog = document.getElementById('messagesLog');
+
+        // Устанавливаем случайное имя по умолчанию для чата
+        wsUsernameInput.value = 'User-' + Math.floor(Math.random() * 100);
+        connectWsButton.disabled = false; // Изначально разрешаем подключение
+
+        // --- Логика HTTP (Задача 1) ---
+        const SERVER_URL = 'http://localhost:8083'; // <-- Полный URL сервера
+
+        const sendHttpRequest = async () => {
+            const name = httpNameInput.value.trim() || 'Guest';
+            // Используем полный URL для HTTP-запроса
+            const url = `${SERVER_URL}/api/greeting?name=${encodeURIComponent(name)}`;
+
+            httpResponseCode.textContent = 'Отправка запроса...';
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status}`);
+                }
+                const data = await response.json();
+                httpResponseCode.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                httpResponseCode.textContent = `Ошибка: Не удалось подключиться к серверу (${error.message}). Убедитесь, что Spring Boot запущен и доступен по ${SERVER_URL}.`;
+                console.error('HTTP Error:', error);
+            }
+        };
+
+        sendHttpButton.addEventListener('click', sendHttpRequest);
+
+        // --- Логика WebSocket (Задача 2) ---
+        let stompClient = null;
+
+        function setConnected(connected) {
+            connectWsButton.disabled = connected || wsUsernameInput.value.trim() === '';
+            disconnectWsButton.disabled = !connected;
+            wsMessageInput.disabled = !connected;
+            sendWsButton.disabled = !connected;
+            connectionStatus.textContent = connected ? 'Статус: Подключено' : 'Статус: Отключено';
+        }
+
+        const connectWs = () => {
+            const username = wsUsernameInput.value.trim();
+            if (!username) return;
+
+            // 1. Создаем SockJS-соединение. ИСПОЛЬЗУЕМ ПОЛНЫЙ URL!
+            const socket = new SockJS(SERVER_URL + '/ws-chat'); // <-- ИСПРАВЛЕНИЕ: Использование SERVER_URL
+            stompClient = Stomp.over(socket); // <-- ИСПРАВЛЕНИЕ: Инициализация STOMP
+
+            // 2. Подключаемся к STOMP
+            stompClient.connect({}, (frame) => {
+                setConnected(true);
+                messagesLog.innerHTML = `<p class="text-green-400">[INFO] Подключено к серверу.</p>`;
+                console.log('Connected: ' + frame);
+
+                // 3. Подписываемся на топик /topic/messages для получения сообщений
+                stompClient.subscribe('/topic/messages', (message) => {
+                    showWsMessage(JSON.parse(message.body));
+                });
+
+            }, (error) => {
+                console.error("Connection Error:", error);
+                messagesLog.innerHTML += `<p class="text-red-400">[ERROR] Ошибка подключения. См. консоль. Убедитесь, что Spring Boot запущен.</p>`;
+                setConnected(false);
+            });
+        };
+
+        const disconnectWs = () => {
+            if (stompClient !== null) {
+                stompClient.disconnect(() => {
+                    setConnected(false);
+                    messagesLog.innerHTML += `<p class="text-yellow-400">[INFO] Соединение разорвано.</p>`;
+                });
+            }
+            setConnected(false);
+        };
+
+        const sendWsMessage = () => {
+            const messageContent = wsMessageInput.value.trim();
+            const sender = wsUsernameInput.value.trim();
+
+            if (!messageContent || !sender) return;
+
+            const chatMessage = {
+                sender: sender,
+                content: messageContent
+            };
+
+            // Отправляем сообщение на назначение контроллера Spring Boot (/app/chat.sendMessage)
+            stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(chatMessage));
+            wsMessageInput.value = ''; // Очищаем поле ввода
+        };
+
+        const showWsMessage = (message) => {
+            // Отображаем сообщение в логе чата
+            const newLog = document.createElement('p');
+            newLog.classList.add('text-sm');
+            newLog.innerHTML = `<span class="text-gray-500">[${message.timestamp}]</span>
+                                    <span class="font-bold text-secondary">${message.sender}:</span>
+                                    <span class="text-white">${message.content}</span>`;
+
+            // Удаляем стартовое сообщение, если оно есть
+            if (messagesLog.querySelector('.text-gray-400')) {
+                messagesLog.innerHTML = '';
+            }
+
+            messagesLog.appendChild(newLog);
+            messagesLog.scrollTop = messagesLog.scrollHeight; // Прокрутка вниз
+        };
+
+        connectWsButton.addEventListener('click', connectWs);
+        disconnectWsButton.addEventListener('click', disconnectWs);
+        sendWsButton.addEventListener('click', sendWsMessage);
+
+        // Отправка по Enter
+        wsMessageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !sendWsButton.disabled) {
+                e.preventDefault();
+                sendWsMessage();
+            }
+        });
+
+        // Проверка имени пользователя для активации кнопки "Connect"
+        wsUsernameInput.addEventListener('input', () => {
+            connectWsButton.disabled = wsUsernameInput.value.trim() === '' || disconnectWsButton.disabled === false;
+        });
+    });
+</script>
+</body>
+</html>
