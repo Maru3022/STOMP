@@ -12,7 +12,9 @@ public class WebScketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws-chat")
-                .setAllowedOrigins("*")
+                // Для Spring Boot 3 / Spring 6 при использовании allowCredentials=true
+                // нельзя использовать setAllowedOrigins("*"), поэтому используем паттерны.
+                .setAllowedOriginPatterns("http://localhost:8083")
                 .withSockJS();
     }
 
