@@ -10,9 +10,9 @@
             theme: {
                 extend: {
                     colors: {
-                        'primary': '#4f46e5',
-                        'secondary': '#10b981',
-                        'background-dark': '#1f2937',
+                        'primary': '#4f46e5', // Indigo
+                        'secondary': '#10b981', // Emerald
+                        'background-dark': '#1f2937', // Dark Gray for chat log
                     }
                 }
             }
@@ -37,7 +37,7 @@
         <h2 class="text-2xl font-semibold mb-4 text-primary">Задача 1: HTTP/REST Тест</h2>
         <div class="flex flex-col sm:flex-row gap-4 mb-4">
             <input type="text" id="httpName" placeholder="Введите имя для приветствия (например, Alex)"
-                   class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                   class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary" value="Alex">
             <button id="sendHttp"
                     class="action-button bg-primary text-white font-semibold py-3 px-6 rounded-lg hover:bg-indigo-600">
                 Send HTTP Request
@@ -57,7 +57,7 @@
             <div class="flex flex-col sm:flex-row gap-4">
                 <input type="text" id="wsUsername" placeholder="Ваше имя пользователя (обязательно)"
                        class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-secondary focus:border-secondary">
-                <button id="connectWs" disabled
+                <button id="connectWs"
                         class="action-button bg-secondary text-white font-semibold py-3 px-6 rounded-lg hover:bg-green-600 disabled:opacity-50">
                     Connect WebSocket
                 </button>
@@ -94,6 +94,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
 
 <script>
+    // Для совместимости с некоторыми версиями SockJS/STOMP
+    if (typeof Stomp === 'undefined') {
+        // Fallback or error message if stomp.js failed to load
+        console.error("STOMP library not loaded.");
+    } else {
+        // Заглушка, чтобы избежать ошибки "Cannot read properties of undefined (reading 'client')"
+        // Stomp.over(socket) должен работать корректно
+        Stomp.client = Stomp.client || function(){};
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         // --- Элементы DOM ---
         const httpNameInput = document.getElementById('httpName');
@@ -108,16 +118,16 @@
         const sendWsButton = document.getElementById('sendWs');
         const messagesLog = document.getElementById('messagesLog');
 
-        // Устанавливаем случайное имя по умолчанию для чата
-        wsUsernameInput.value = 'User-' + Math.floor(Math.random() * 100);
-        connectWsButton.disabled = false; // Изначально разрешаем подключение
+        // Установка случайного имени по умолчанию и активация кнопки Connect
+        wsUsernameInput.value = 'User-' + Math.floor(Math.random() * 1000);
+
+        // --- Настройки сервера (ИСПРАВЛЕНО на 8084) ---
+        // Убедитесь, что это соответствует server.port=8084 в application.properties
+        const SERVER_URL = 'http://localhost:8084';
 
         // --- Логика HTTP (Задача 1) ---
-        const SERVER_URL = 'http://localhost:8083'; // <-- Полный URL сервера
-
         const sendHttpRequest = async () => {
             const name = httpNameInput.value.trim() || 'Guest';
-            // Используем полный URL для HTTP-запроса
             const url = `${SERVER_URL}/api/greeting?name=${encodeURIComponent(name)}`;
 
             httpResponseCode.textContent = 'Отправка запроса...';
@@ -125,7 +135,7 @@
             try {
                 const response = await fetch(url);
                 if (!response.ok) {
-                    throw new Error(`HTTP Error: ${response.status}`);
+                    throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
                 }
                 const data = await response.json();
                 httpResponseCode.textContent = JSON.stringify(data, null, 2);
@@ -137,62 +147,72 @@
 
         sendHttpButton.addEventListener('click', sendHttpRequest);
 
+
         // --- Логика WebSocket (Задача 2) ---
         let stompClient = null;
 
-        function setConnected(connected) {
-            connectWsButton.disabled = connected || wsUsernameInput.value.trim() === '';
+        function updateUIState(connected) {
+            const usernameValid = wsUsernameInput.value.trim() !== '';
+
+            connectWsButton.disabled = connected || !usernameValid;
             disconnectWsButton.disabled = !connected;
             wsMessageInput.disabled = !connected;
             sendWsButton.disabled = !connected;
+
             connectionStatus.textContent = connected ? 'Статус: Подключено' : 'Статус: Отключено';
+
+            // Если отключено, разрешаем ввод имени, иначе блокируем
+            wsUsernameInput.disabled = connected;
         }
 
         const connectWs = () => {
             const username = wsUsernameInput.value.trim();
             if (!username) return;
 
-            // 1. Создаем SockJS-соединение. ИСПОЛЬЗУЕМ ПОЛНЫЙ URL!
-            const socket = new SockJS(SERVER_URL + '/ws-chat'); // <-- ИСПРАВЛЕНИЕ: Использование SERVER_URL
-            stompClient = Stomp.over(socket); // <-- ИСПРАВЛЕНИЕ: Инициализация STOMP
+            // 1. Создаем SockJS-соединение.
+            const socket = new SockJS(SERVER_URL + '/ws-chat');
+            stompClient = Stomp.over(socket);
 
             // 2. Подключаемся к STOMP
             stompClient.connect({}, (frame) => {
-                setConnected(true);
-                messagesLog.innerHTML = `<p class="text-green-400">[INFO] Подключено к серверу.</p>`;
+                updateUIState(true);
+                messagesLog.innerHTML = `<p class="text-green-400">[INFO] Успешно подключено как ${username}.</p>`;
                 console.log('Connected: ' + frame);
 
-                // 3. Подписываемся на топик /topic/messages для получения сообщений
+                // 3. Подписываемся на публичный топик для получения сообщений
                 stompClient.subscribe('/topic/messages', (message) => {
                     showWsMessage(JSON.parse(message.body));
                 });
 
             }, (error) => {
                 console.error("Connection Error:", error);
-                messagesLog.innerHTML += `<p class="text-red-400">[ERROR] Ошибка подключения. См. консоль. Убедитесь, что Spring Boot запущен.</p>`;
-                setConnected(false);
+                messagesLog.innerHTML += `<p class="text-red-400">[ERROR] Ошибка подключения. Убедитесь, что Spring Boot запущен на ${SERVER_URL}.</p>`;
+                updateUIState(false);
             });
         };
 
         const disconnectWs = () => {
-            if (stompClient !== null) {
+            if (stompClient && stompClient.connected) {
                 stompClient.disconnect(() => {
-                    setConnected(false);
+                    updateUIState(false);
                     messagesLog.innerHTML += `<p class="text-yellow-400">[INFO] Соединение разорвано.</p>`;
                 });
+            } else {
+                updateUIState(false);
             }
-            setConnected(false);
         };
 
         const sendWsMessage = () => {
             const messageContent = wsMessageInput.value.trim();
             const sender = wsUsernameInput.value.trim();
 
-            if (!messageContent || !sender) return;
+            if (!messageContent || !sender || !stompClient || !stompClient.connected) return;
 
             const chatMessage = {
                 sender: sender,
-                content: messageContent
+                content: messageContent,
+                // Time will be set by the server, but we can add it here if needed for consistency
+                // timestamp: new Date().toLocaleTimeString()
             };
 
             // Отправляем сообщение на назначение контроллера Spring Boot (/app/chat.sendMessage)
@@ -201,15 +221,17 @@
         };
 
         const showWsMessage = (message) => {
-            // Отображаем сообщение в логе чата
             const newLog = document.createElement('p');
             newLog.classList.add('text-sm');
-            newLog.innerHTML = `<span class="text-gray-500">[${message.timestamp}]</span>
+            // Если сервер не возвращает timestamp, используем текущее время (на всякий случай)
+            const time = message.timestamp || new Date().toLocaleTimeString();
+
+            newLog.innerHTML = `<span class="text-gray-500">[${time}]</span>
                                     <span class="font-bold text-secondary">${message.sender}:</span>
                                     <span class="text-white">${message.content}</span>`;
 
             // Удаляем стартовое сообщение, если оно есть
-            if (messagesLog.querySelector('.text-gray-400')) {
+            if (messagesLog.children[0] && messagesLog.children[0].classList.contains('text-gray-400')) {
                 messagesLog.innerHTML = '';
             }
 
@@ -231,8 +253,11 @@
 
         // Проверка имени пользователя для активации кнопки "Connect"
         wsUsernameInput.addEventListener('input', () => {
-            connectWsButton.disabled = wsUsernameInput.value.trim() === '' || disconnectWsButton.disabled === false;
+            updateUIState(stompClient && stompClient.connected);
         });
+
+        // Начальная установка состояния
+        updateUIState(false);
     });
 </script>
 </body>
